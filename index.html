@@ -31,7 +31,8 @@ input{-webkit-user-select:text;user-select:text}
 :root[data-theme="dark"] #nov{background:rgba(42,40,36,.96)}
 .code{font:700 38px/1.2 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.14em;margin:10px 0;padding:8px 6px 8px 14px;border:3px dashed #333;border-radius:12px;background:#fff6c9;color:#222;-webkit-user-select:text;user-select:text}
 .jin{display:block;margin:10px auto;width:240px;font:700 28px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.2em;text-transform:uppercase;text-align:center;padding:6px 4px 6px 12px;border:3px solid #333;border-radius:10px;background:#fffdf5;color:#222;box-sizing:border-box}
-</style></head><body>
+.jin.nm{font:inherit;font-size:20px;letter-spacing:.05em;text-transform:none;padding:6px 10px}
+</style><script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script></head><body>
 <div id="stage"><div id="wrap"><canvas id="cv"></canvas></div>
 <div id="pad"><div class="grp">
 <button class="b" data-k="j" style="grid-area:1/2"><span>▲</span>ジャンプ</button>
@@ -291,6 +292,7 @@ function initAc(){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)
 function genCode(){let s='';const a=new Uint32Array(7);try{crypto.getRandomValues(a)}catch(e){for(let i=0;i<7;i++)a[i]=Math.random()*4294967296}for(let i=0;i<7;i++)s+=ALPH[a[i]%32];return s}
 function nUI(o){nc.innerHTML='';const h=document.createElement('h1');h.style.fontSize='24px';h.textContent=o.t;nc.appendChild(h);
  if(o.code){const c=document.createElement('div');c.className='code';c.textContent=o.code;nc.appendChild(c)}
+ if(o.name){const i=document.createElement('input');i.id='nmi';i.className='jin nm';i.maxLength=8;i.placeholder='なまえ';i.setAttribute('autocomplete','off');i.value=pnm||'';i.onkeydown=e=>{if(e.key==='Enter'){const j=document.getElementById('jc');if(j)j.focus();else if(o.onEnter)o.onEnter()}};nc.appendChild(i)}
  if(o.input){const i=document.createElement('input');i.id='jc';i.className='jin';i.maxLength=7;i.placeholder='XXXXXXX';i.setAttribute('autocapitalize','characters');i.setAttribute('autocomplete','off');i.setAttribute('autocorrect','off');i.spellcheck=false;i.value=o.val||'';i.oninput=()=>{i.value=i.value.toUpperCase().replace(/[^A-Z0-9]/g,'')};i.onkeydown=e=>{if(e.key==='Enter'&&o.onEnter)o.onEnter(i.value)};nc.appendChild(i)}
  if(o.m){const p=document.createElement('p');p.textContent=o.m;nc.appendChild(p)}
  (o.b||[]).forEach(([l,f,c])=>{const b=document.createElement('button');b.className='pb '+(c||'');b.textContent=l;b.onclick=f;nc.appendChild(b)});
@@ -300,29 +302,48 @@ function netReset(){const rm=net.room;net.room=null;if(rm){try{Promise.resolve(r
 function netExit(){netReset();onl=false;m2=false;tr=false;nov.style.display='none';document.querySelector('.cmd').innerHTML=CMD_OFF}
 function leaveBtn(){return['やめる',()=>{netExit();toTitle()}]}
 function nErr(msg){netExit();nUI({t:'ごめん！',m:msg,b:[['もどる',()=>{nov.style.display='none';toTitle()}]]})}
-async function getRoom(){let R=null;try{if(window.claude&&window.claude.use)R=await window.claude.use('room')}catch(e){}if(!R){nErr('オンライン対戦は、ログインした状態でこのページを開いたときだけ使えるよ。');return null}return R}
+function mkPeerRoom(role,code){return new Promise((resolve,reject)=>{
+ if(typeof Peer==='undefined'){reject({type:'nolib'});return}
+ const id='tfight-'+code.toLowerCase();let pr;
+ try{pr=role==='h'?new Peer(id):new Peer()}catch(e){reject({type:'nolib'});return}
+ const R={mine:{},remote:null,conn:null,id:'',oid:'',failed:null,dead:false};
+ const send=()=>{if(R.conn&&R.conn.open){try{R.conn.send({p:R.mine})}catch(e){}}};
+ const bind=c=>{R.conn=c;R.oid=c.peer;c.on('open',send);c.on('data',m=>{if(m&&m.p)R.remote=m.p});c.on('close',()=>{if(R.conn===c){R.conn=null;R.remote=null}});c.on('error',()=>{});if(c.open)send()};
+ let opened=false;const tm=setTimeout(()=>{if(!opened){try{pr.destroy()}catch(e){}reject({type:'timeout'})}},10000);
+ pr.on('open',pid=>{opened=true;clearTimeout(tm);R.id=pid;if(role==='g')bind(pr.connect(id,{reliable:true}));resolve(R)});
+ pr.on('connection',c=>{if(R.conn&&R.conn.open){c.on('open',()=>{try{c.send({full:1})}catch(e){}setTimeout(()=>{try{c.close()}catch(e){}},400)});return}bind(c)});
+ pr.on('error',e=>{if(R.dead)return;if(!opened){clearTimeout(tm);try{pr.destroy()}catch(x){}reject(e);return}if(e.type==='peer-unavailable')R.failed='notfound';else R.failed='net'});
+ pr.on('disconnected',()=>{if(!R.dead){try{pr.reconnect()}catch(e){}}});
+ R.presence=p=>{const m=Object.assign({},R.mine,p);for(const k in m)if(m[k]===null)delete m[k];R.mine=m;send();return Promise.resolve()};
+ R.peers=()=>{const a=[{peer:R.id,isMe:true,presence:R.mine}];if(R.conn&&R.conn.open&&R.remote)a.push({peer:R.oid,isMe:false,presence:R.remote});return a};
+ R.leave=()=>{R.dead=true;try{pr.destroy()}catch(e){}return Promise.resolve()};
+})}
+const netErrMsg=e=>e&&e.type==='nolib'?'通信ライブラリを読み込めなかったよ。ネットにつながってるか確認してね。':'サーバーにつなげなかったよ。もう一度ためしてね。';
+function readName(){const el=document.getElementById('nmi'),v=cleanName(el&&el.value);if(!v){const p=nc.querySelector('p');if(p)p.textContent='なまえを入れてね！（8文字まで）';return ''}pnm=v;try{localStorage.setItem('tf_name',v)}catch(e){}document.getElementById('pname').value=v;return v}
 function netBegin(rm,role,code){netReset();onl=true;net.room=rm;net.role=role;net.code=code;net.t0=performance.now();net.st=role==='h'?'wait':'join';
- try{rm.presence({role,nm:'',ch:-1,g:0,s:0,d:'',a:0}).catch(()=>{})}catch(e){}}
+ try{rm.presence({role,nm:pnm,ch:-1,g:0,s:0,d:'',a:0}).catch(()=>{})}catch(e){}}
 function hostWaitUI(){nUI({t:'ルームを作ったよ！',code:net.code,m:'このコードを友だちに教えてね。入ってくるまで待ってるよ…',b:[['📋 コードをコピー',function(){try{navigator.clipboard.writeText(net.code).then(()=>{this.textContent='コピーした！'},()=>{});}catch(e){}}],leaveBtn()]})}
-async function netCreateUI(){
+function netCreateUI(){nUI({t:'ルームを作る',name:1,m:'あなたのなまえを入れてね',onEnter:doCreate,b:[['作る',doCreate],['もどる',()=>{nov.style.display='none';toTitle()}]]})}
+async function doCreate(){
+ if(!readName())return;
  nUI({t:'ルームを作る',m:'準備中…'});
- const R=await getRoom();if(!R)return;
- const code=genCode();let rm;
- try{rm=await R.join('tf-'+code.toLowerCase())}catch(e){nErr('ルームを作れなかったよ。もう一度ためしてね。');return}
- netBegin(rm,'h',code);hostWaitUI()}
-function netJoinUI(msg){nUI({t:'ルームに入る',input:1,m:msg||'7けたのコードを入れてね',onEnter:netJoin,b:[['入る',()=>netJoin(document.getElementById('jc').value)],['もどる',()=>{nov.style.display='none';toTitle()}]]})}
-async function netJoin(v){
- const code=String(v||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
- if(code.length!==7){netJoinUI('コードは7けただよ！');return}
+ for(let k=0;k<4;k++){const code=genCode();
+  try{const rm=await mkPeerRoom('h',code);netBegin(rm,'h',code);hostWaitUI();return}
+  catch(e){if(e&&e.type==='unavailable-id')continue;nErr(netErrMsg(e));return}}
+ nErr('ルームを作れなかったよ。もう一度ためしてね。')}
+function netJoinUI(msg){const keep=(document.getElementById('jc')||{}).value;nUI({t:'ルームに入る',name:1,input:1,val:keep||'',m:msg||'なまえと、7けたのコードを入れてね',onEnter:netJoin,b:[['入る',()=>netJoin()],['もどる',()=>{nov.style.display='none';toTitle()}]]})}
+async function netJoin(){
+ const code=String((document.getElementById('jc')||{}).value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+ if(!readName())return;
+ if(code.length!==7){const p=nc.querySelector('p');if(p)p.textContent='コードは7けただよ！';return}
  nUI({t:'接続中…',m:'ルーム '+code+' を探しているよ'});
- const R=await getRoom();if(!R)return;
- let rm;try{rm=await R.join('tf-'+code.toLowerCase())}catch(e){nErr('ルームに入れなかったよ。もう一度ためしてね。');return}
+ let rm;try{rm=await mkPeerRoom('g',code)}catch(e){nErr(netErrMsg(e));return}
  netBegin(rm,'g',code);nUI({t:'接続中…',m:'ルーム '+code+' を探しているよ',b:[leaveBtn()]})}
 function netFail(msg){netExit();nUI({t:'入れなかった…',m:msg,b:[['もう一度',()=>netJoinUI()],['タイトルへ',()=>{nov.style.display='none';toTitle()}]]})}
-function showSelOnline(){nov.style.display='none';document.getElementById('ov').style.display='none';sel.style.display='flex';cards[3].style.display='';document.getElementById('nrow').style.display='';document.getElementById('seltitle').textContent='キャラを選べ！';document.querySelector('.cmd').innerHTML=CMD_ON+'<br>ルーム: '+net.code}
+function showSelOnline(){nov.style.display='none';document.getElementById('ov').style.display='none';sel.style.display='flex';cards[3].style.display='';document.getElementById('nrow').style.display='';document.getElementById('seltitle').textContent='キャラを選べ！';const on=net.opp?cleanName(net.opp.presence.nm):'';document.getElementById('pname').value=pnm||'';document.querySelector('.cmd').innerHTML=CMD_ON+'<br>ルーム: '+net.code+(on?' ／ あいて: '+on:'')}
 function netPick(i){if(!net.room)return;pnm=cleanName(document.getElementById('pname').value);try{localStorage.setItem('tf_name',pnm)}catch(e){}
  net.ch=i;try{net.room.presence({ch:i,nm:pnm,g:net.g}).catch(()=>{})}catch(e){}
- sel.style.display='none';nUI({t:'相手を待ってるよ…',m:'相手がキャラを選んだらスタート！',b:[leaveBtn()]})}
+ sel.style.display='none';nUI({t:'相手を待ってるよ…',m:(net.opp&&cleanName(net.opp.presence.nm)?'あいて: '+cleanName(net.opp.presence.nm)+'　':'')+'相手がキャラを選んだらスタート！',b:[leaveBtn()]})}
 function netLeft(){net.run=false;net.st='left';ph='title';sel.style.display='none';const host=net.role==='h',b=[];
  if(host)b.push(['このルームで待つ',netReWait]);b.push(['タイトルへ',()=>{netExit();toTitle()}]);
  nUI({t:'相手がいなくなった…',m:host?'ルームはそのまま使えるよ。':'',b})}
@@ -332,6 +353,7 @@ function netEnd(){net.run=false;net.st='end';const hw=wins[0]>=2,won=hw===(net.r
 function netRematch(){if(!net.room)return;net.g++;net.ch=-1;net.st='sel';try{net.room.presence({g:net.g,ch:-1,s:0,d:'',a:0}).catch(()=>{})}catch(e){}showSelOnline()}
 function netPoll(){
  const rm=net.room;if(!rm||!onl)return;
+ if(rm.failed){const f=rm.failed;rm.failed=null;if(f==='notfound'){netFail('ルームが見つからなかったよ。コードをもう一度たしかめてね。');return}if(net.st==='sel'||net.st==='play'||net.st==='end'){netLeft();return}netFail('つなげなかったよ。もう一度ためしてね。');return}
  const ps=rm.peers(),mp=ps.find(p=>p.isMe);if(!mp)return;net.myPeer=mp.peer;
  const oth=ps.filter(p=>!p.isMe),now=performance.now();
  if(net.role==='h'){
